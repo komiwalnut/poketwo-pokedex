@@ -26,7 +26,7 @@ console_handler.setFormatter(console_format)
 
 file_handler = RotatingFileHandler(
     'logs/poketwo_bot.log',
-    maxBytes=10 * 1024 * 1024,
+    maxBytes=30 * 1024 * 1024,
     backupCount=5
 )
 file_handler.setLevel(logging.INFO)
