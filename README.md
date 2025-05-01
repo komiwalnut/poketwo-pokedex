@@ -40,8 +40,8 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
    ```
 3. Create and activate a virtual environment:
    ```
-   python3 -m venv venv
-   source venv/bin/activate
+   python3 -m venv pokedex-venv
+   source pokedex-venv/bin/activate
    ```
 
 4. Install dependencies:
@@ -59,7 +59,7 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 ### Running the Bot
 
 ```
-nohup python3 -u main.py > /dev/null 2>&1 &
+nohup python3 -u pokedex.py > /dev/null 2>&1 &
 ```
 
 The bot will automatically create a `logs` directory with rotating log files.
