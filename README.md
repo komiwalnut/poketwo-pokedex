@@ -6,17 +6,18 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 
 ## Features
 
-- Monitors Pokétwo's "A wild pokémon has appeared!" messages
-- Uses Google Gemini AI to identify the Pokémon from the image
-- Sends a rich embedded DM to subscribed users with:
-  - Pokémon name and image
-  - Direct link to the message for quick navigation
-  - Server information to know where the Pokémon spawned
-  - Formatted catch command for easy copying
-- Server-specific subscriptions allowing users to choose which servers to receive notifications from
-- Color-coded notifications based on Pokémon types
-- Persistent storage using JSON files (subscriptions won't be lost on restart)
-- Automatic log rotation to manage disk space
+- **Real-time Pokémon Detection**  
+  Monitors Pokétwo's "A wild pokémon has appeared!" messages
+- **AI Identification**  
+  Uses Google Gemini AI to identify Pokémon from images
+- **Smart Correction System**  
+  "Wrong Pokémon?" button triggers fresh AI analysis of the original image
+- **Rich Notifications**  
+  Color-coded embeds with:
+  - Pokémon name and thumbnail
+  - Direct message link
+  - Server context
+  - Pre-formatted catch command
 
 ## Setup
 
