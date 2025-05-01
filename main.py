@@ -232,7 +232,7 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
                         )
                         embed.add_field(
                             name="Catch Command",
-                            value=f"`@Pokétwo catch {pokemon_name}`",
+                            value=f"`<@716390085896962058> catch {pokemon_name}`",
                             inline=False
                         )
                         embed.add_field(
