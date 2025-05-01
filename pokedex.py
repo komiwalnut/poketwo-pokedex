@@ -96,41 +96,10 @@ async def periodic_save():
         await asyncio.sleep(60)
 
 
-async def load_pokemon_database():
-    global pokemon_database
-    try:
-        response = requests.get("https://pokeapi.co/api/v2/pokemon?limit=1302")
-        if response.status_code == 200:
-            data = response.json()
-            pokemon_database = {entry['name']: True for entry in data['results']}
-            logger.info(f"Loaded {len(pokemon_database)} Pokémon names into database")
-        else:
-            logger.error(f"Failed to fetch Pokémon database: {response.status_code}")
-    except Exception as err:
-        logger.error(f"Error loading Pokémon database: {err}")
-
-
-def verify_pokemon_name(name):
-    if not name:
-        return None
-
-    name = name.lower().strip()
-
-    if name in pokemon_database:
-        return name
-
-    for pokemon in pokemon_database:
-        if name in pokemon or pokemon in name:
-            return pokemon
-
-    return name
-
-
 @bot.event
 async def on_ready():
     logger.info(f"{bot.user} is online and ready!")
     load_subscriptions()
-    await load_pokemon_database()
     try:
         synced = await bot.tree.sync()
         logger.info(f"Synced {len(synced)} command(s)")
@@ -232,7 +201,7 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
                         )
                         embed.add_field(
                             name="Catch Command",
-                            value=f"`<@716390085896962058> catch {pokemon_name}`",
+                            value=f"```<@716390085896962058> catch {pokemon_name}```",
                             inline=False
                         )
                         embed.add_field(
@@ -291,39 +260,19 @@ async def identify_pokemon(image_bytes):
     try:
         image_bytes.seek(0)
 
-        prompt1 = "This is a Pokémon from the Pokétwo Discord bot. Identify the exact Pokémon name. Be precise and give only the name."
+        prompt = "What Pokémon is this? Give me just the name, no other text."
 
-        response1 = gemini_model.generate_content([
-            prompt1,
+        response = gemini_model.generate_content([
+            prompt,
             {"mime_type": "image/jpeg", "data": image_bytes.read()}
         ])
 
         image_bytes.seek(0)
 
-        prompt2 = "What Pokémon is this? Give me just the name, no other text."
+        pokemon_name = response.text.strip().lower()
+        logger.info(f"Gemini identified Pokémon as: {pokemon_name}")
 
-        response2 = gemini_model.generate_content([
-            prompt2,
-            {"mime_type": "image/jpeg", "data": image_bytes.read()}
-        ])
-
-        pokemon_name1 = response1.text.strip().lower()
-        pokemon_name2 = response2.text.strip().lower()
-
-        logger.info(f"Gemini identified Pokémon as: {pokemon_name1} and {pokemon_name2}")
-
-        final_name = pokemon_name1
-        if pokemon_name2 in pokemon_database and pokemon_name1 not in pokemon_database:
-            final_name = pokemon_name2
-
-        verified_name = verify_pokemon_name(final_name)
-
-        if verified_name:
-            logger.info(f"Verified Pokémon name: {verified_name}")
-            return verified_name
-        else:
-            logger.warning(f"Could not verify Pokémon name: {final_name}")
-            return final_name
+        return pokemon_name
 
     except Exception as err:
         logger.error(f"Error identifying Pokémon with Gemini: {err}")
