@@ -8,8 +8,15 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 
 - Monitors Pokétwo's "A wild pokémon has appeared!" messages
 - Uses Google Gemini AI to identify the Pokémon from the image
-- Sends a DM to a specified user with the Pokémon name and catch command
-- Allows users to subscribe/unsubscribe to notifications via slash commands
+- Sends a rich embedded DM to subscribed users with:
+  - Pokémon name and image
+  - Direct link to the message for quick navigation
+  - Server information to know where the Pokémon spawned
+  - Formatted catch command for easy copying
+- Server-specific subscriptions allowing users to choose which servers to receive notifications from
+- Color-coded notifications based on Pokémon types
+- Persistent storage using JSON files (subscriptions won't be lost on restart)
+- Automatic log rotation to manage disk space
 
 ## Setup
 
@@ -18,7 +25,6 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 - Python 3.8 or higher
 - Discord Bot Token
 - Google Gemini API Key
-- Discord Developer Mode enabled to get user IDs
 
 ### Installation
 
@@ -53,14 +59,18 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 ### Running the Bot
 
 ```
-nohup python3 -u main.py > bot_output.log 2>&1 &
+nohup python3 -u main.py > /dev/null 2>&1 &
 ```
+
+The bot will automatically create a `logs` directory with rotating log files.
 
 ## Commands
 
-- `/sub` - Subscribe to receive Pokémon notifications
-- `/unsub` - Unsubscribe from Pokémon notifications
-- `/sub_status` - Check your subscription status
+- `/sub` - Subscribe to receive Pokémon notifications in the current server
+- `/unsub` - Unsubscribe from Pokémon notifications in the current server
+- `/sub_status` - Check your subscription status across all servers
+- `/sub_all` - Subscribe to multiple servers at once (limited to 10 servers)
+- `/unsub_all` - Unsubscribe from all servers
 
 ## Getting a Discord Bot Token
 
