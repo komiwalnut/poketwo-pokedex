@@ -2,7 +2,8 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-import requests
+from discord.ext import tasks
+import aiohttp
 import google.generativeai as genai
 from io import BytesIO
 import logging
@@ -10,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
 import json
 import asyncio
+import uuid
 
 load_dotenv()
 
@@ -25,7 +27,7 @@ console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(m
 console_handler.setFormatter(console_format)
 
 file_handler = RotatingFileHandler(
-    'logs/poketwo_bot.log',
+    'logs/pokebot.log',
     maxBytes=30 * 1024 * 1024,
     backupCount=5
 )
@@ -50,7 +52,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel('gemini-2.5-flash-preview-04-17')
 
 subscribed_users = {}
-pokemon_database = {}
+pending_corrections = {}
 last_save_time = 0
 
 
@@ -60,7 +62,6 @@ def load_subscriptions():
         if os.path.exists(SUBSCRIPTION_FILE):
             with open(SUBSCRIPTION_FILE, 'r') as f:
                 data = json.load(f)
-
             subscribed_users = {int(user_id): set(guild_ids) for user_id, guild_ids in data.items()}
             logger.info(f"Loaded subscriptions for {len(subscribed_users)} users")
         else:
@@ -75,13 +76,10 @@ def save_subscriptions():
     global last_save_time
     try:
         data = {str(user_id): list(guild_ids) for user_id, guild_ids in subscribed_users.items()}
-
         temp_file = f"{SUBSCRIPTION_FILE}.tmp"
         with open(temp_file, 'w') as f:
             json.dump(data, f, indent=2)
-
         os.replace(temp_file, SUBSCRIPTION_FILE)
-
         last_save_time = asyncio.get_event_loop().time()
         logger.info(f"Saved subscriptions for {len(subscribed_users)} users")
     except Exception as err:
@@ -96,15 +94,107 @@ async def periodic_save():
         await asyncio.sleep(60)
 
 
+async def rotating_status():
+    while True:
+        statuses = [
+            {"type": discord.ActivityType.watching, "name": "for shinies!"},
+            {"type": discord.ActivityType.playing, "name": f"with {len(bot.guilds)} servers"},
+        ]
+        for status in statuses:
+            await bot.change_presence(activity=discord.Activity(**status))
+            await asyncio.sleep(300)
+
+
+async def fetch_image(session, url):
+    async with session.get(url) as response:
+        return await response.read()
+
+
+@bot.listen()
+async def on_interaction(interaction: discord.Interaction):
+    try:
+        if interaction.type == discord.InteractionType.component:
+            custom_id = interaction.data.get('custom_id', '')
+            if custom_id.startswith("wrong_pokemon:"):
+                correction_id = custom_id.split(":")[1]
+                data = pending_corrections.get(correction_id)
+
+                if not data:
+                    await interaction.response.send_message("This request has expired.", ephemeral=True)
+                    return
+
+                await interaction.response.defer(thinking=True)
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        image_data = await fetch_image(session, data["image_url"])
+                        image_bytes = BytesIO(image_data)
+                        new_name = await identify_pokemon(image_bytes)
+
+                        if not new_name:
+                            await interaction.followup.send("Identification failed. Try again later.", ephemeral=True)
+                            return
+
+                        if new_name:
+                            new_color = await get_pokemon_color(new_name)
+                            original_embed = interaction.message.embeds[0]
+
+                            new_embed = discord.Embed(
+                                title=original_embed.title,
+                                description=f"I spotted a **{new_name.capitalize()}** in **{data['guild_name']}**!",
+                                color=new_color
+                            )
+
+                            for field in original_embed.fields:
+                                if field.name == "Catch Command":
+                                    new_embed.add_field(
+                                        name="Catch Command",
+                                        value=f"```<@716390085896962058> catch {new_name}```",
+                                        inline=False
+                                    )
+                                else:
+                                    new_embed.add_field(
+                                        name=field.name,
+                                        value=field.value,
+                                        inline=field.inline
+                                    )
+
+                            new_embed.set_thumbnail(url=original_embed.thumbnail.url)
+                            new_embed.set_footer(text=original_embed.footer.text)
+
+                            await interaction.message.edit(embed=new_embed)
+                            await interaction.followup.send("Updated with new identification!", ephemeral=True)
+                        else:
+                            await interaction.followup.send("Failed to re-identify Pokémon.", ephemeral=True)
+
+                except Exception as err:
+                    logger.error(f"Re-ID error: {err}")
+                    await interaction.followup.send("Error processing request. Please try a new spawn.", ephemeral=True)
+
+    except Exception as err:
+        logger.error(f"Interaction error: {err}")
+
+
 @bot.event
 async def on_ready():
     logger.info(f"{bot.user} is online and ready!")
     load_subscriptions()
+
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name="for wild Pokémon!",
+            details="Scanning servers",
+            state=f"in {len(bot.guilds)} communities"
+        ),
+        status=discord.Status.online
+    )
+
     try:
         synced = await bot.tree.sync()
         logger.info(f"Synced {len(synced)} command(s)")
-
         bot.loop.create_task(periodic_save())
+        bot.loop.create_task(rotating_status())
     except Exception as err:
         logger.error(f"Failed to sync commands: {err}")
 
@@ -113,143 +203,113 @@ async def on_ready():
 async def on_message(message):
     if message.author == bot.user:
         return
-
     if message.author.id != POKETWO_ID:
         await bot.process_commands(message)
         return
 
     logger.info(f"Received message from Pokétwo in server: {message.guild.name if message.guild else 'DM'}")
-    if message.embeds:
-        for i, embed in enumerate(message.embeds):
-            logger.info(f"Embed {i + 1} - Title: '{embed.title}', Description: '{embed.description}'")
-            if embed.image:
-                logger.info(f"Embed {i + 1} has image: {embed.image.url}")
-    if message.attachments:
-        logger.info(f"Message has {len(message.attachments)} attachments")
-        for i, attachment in enumerate(message.attachments):
-            logger.info(f"Attachment {i + 1}: {attachment.url}")
-
-    wild_pokemon_detected = False
-
-    pokemon_patterns = [
-        "A wild pokémon has appeared!",
-        "wild pokémon has appeared!",
-        "fled. A new wild pokémon has appeared!"
-    ]
-
-    if message.content:
-        for pattern in pokemon_patterns:
-            if pattern in message.content:
-                wild_pokemon_detected = True
-                break
-
-    if message.embeds:
-        for embed in message.embeds:
-            if embed.title:
-                for pattern in pokemon_patterns:
-                    if pattern in embed.title:
-                        wild_pokemon_detected = True
-                        break
-
-            if embed.description:
-                for pattern in pokemon_patterns:
-                    if pattern in embed.description:
-                        wild_pokemon_detected = True
-                        break
+    wild_pokemon_detected = any(
+        pattern in message.content or
+        any(embed.title and pattern in embed.title or
+            embed.description and pattern in embed.description
+            for embed in message.embeds)
+        for pattern in [
+            "A wild pokémon has appeared!",
+            "wild pokémon has appeared!",
+            "fled. A new wild pokémon has appeared!"
+        ]
+    )
 
     if wild_pokemon_detected and message.guild:
         logger.info(f"Wild Pokémon detected in server: {message.guild.name}!")
         guild_id = message.guild.id
         guild_name = message.guild.name
-        channel_id = message.channel.id
-        message_id = message.id
-        message_link = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
+        message_link = f"https://discord.com/channels/{guild_id}/{message.channel.id}/{message.id}"
 
-        if message.attachments and len(message.attachments) > 0:
-            attachment = message.attachments[0]
-            await process_pokemon_image(attachment.url, guild_id, guild_name, message_link)
-
-        elif message.embeds:
+        image_url = None
+        if message.attachments:
+            image_url = message.attachments[0].url
+        else:
             for embed in message.embeds:
                 if embed.image and embed.image.url:
-                    logger.info(f"Found image in embed: {embed.image.url}")
-                    await process_pokemon_image(embed.image.url, guild_id, guild_name, message_link)
+                    image_url = embed.image.url
                     break
+
+        if image_url:
+            await process_pokemon_image(image_url, guild_id, guild_name, message_link)
 
     await bot.process_commands(message)
 
 
 async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
     try:
-        response = requests.get(image_url)
-        image_bytes = BytesIO(response.content)
+        async with aiohttp.ClientSession() as session:
+            image_data = await fetch_image(session, image_url)
+            image_bytes = BytesIO(image_data)
+            pokemon_name = await identify_pokemon(image_bytes)
 
-        pokemon_name = await identify_pokemon(image_bytes)
+            if pokemon_name:
+                pokemon_color = await get_pokemon_color(pokemon_name)
+                correction_id = str(uuid.uuid4())
+                pending_corrections[correction_id] = {
+                    "image_url": image_url,
+                    "guild_name": guild_name,
+                    "message_link": message_link,
+                    "image_bytes": image_bytes.getvalue()
+                }
 
-        if pokemon_name:
-            pokemon_color = await get_pokemon_color(pokemon_name)
+                for user_id, guilds in subscribed_users.items():
+                    if guild_id in guilds:
+                        try:
+                            user = await bot.fetch_user(user_id)
+                            embed = discord.Embed(
+                                title="Wild Pokémon Appeared! ✨",
+                                description=f"I spotted a **{pokemon_name.capitalize()}** in **{guild_name}**!",
+                                color=pokemon_color
+                            )
+                            embed.add_field(
+                                name="Catch Command",
+                                value=f"```<@716390085896962058> catch {pokemon_name}```",
+                                inline=False
+                            )
+                            embed.add_field(
+                                name="Server Location",
+                                value=f"[Click here to go to the message]({message_link})",
+                                inline=False
+                            )
+                            embed.set_thumbnail(url=image_url)
+                            embed.set_footer(text=f"PokéDetector | Guild: {guild_name}")
 
-            for user_id, guilds in subscribed_users.items():
-                if guild_id in guilds:
-                    try:
-                        user = await bot.fetch_user(user_id)
+                            view = discord.ui.View()
+                            view.add_item(discord.ui.Button(
+                                label="Wrong Pokemon",
+                                style=discord.ButtonStyle.danger,
+                                custom_id=f"wrong_pokemon:{correction_id}"
+                            ))
 
-                        embed = discord.Embed(
-                            title=f"Wild Pokémon Appeared! ✨",
-                            description=f"I spotted a **{pokemon_name.capitalize()}** in **{guild_name}**!",
-                            color=pokemon_color
-                        )
-                        embed.add_field(
-                            name="Catch Command",
-                            value=f"```<@716390085896962058> catch {pokemon_name}```",
-                            inline=False
-                        )
-                        embed.add_field(
-                            name="Server Location",
-                            value=f"[Click here to go to the message]({message_link})",
-                            inline=False
-                        )
-                        embed.set_thumbnail(url=image_url)
-                        embed.set_footer(text=f"PokéDetector | Guild: {guild_name}")
-
-                        await user.send(embed=embed)
-
-                    except Exception as err:
-                        logger.error(f"Failed to DM user {user_id}: {err}")
-
+                            await user.send(embed=embed, view=view)
+                        except Exception as err:
+                            logger.error(f"Failed to DM user {user_id}: {err}")
     except Exception as err:
         logger.error(f"Error processing Pokémon image: {err}")
 
 
 async def get_pokemon_color(pokemon_name):
     try:
-        response = requests.get(f"https://pokeapi.co/api/v2/pokemon/{pokemon_name}")
-        if response.status_code == 200:
-            data = response.json()
-            if "types" in data and len(data["types"]) > 0:
-                primary_type = data["types"][0]["type"]["name"]
-                type_colors = {
-                    "normal": 0xA8A77A,  # Light brown
-                    "fire": 0xEE8130,  # Orange
-                    "water": 0x6390F0,  # Blue
-                    "electric": 0xF7D02C,  # Yellow
-                    "grass": 0x7AC74C,  # Green
-                    "ice": 0x96D9D6,  # Light blue
-                    "fighting": 0xC22E28,  # Red
-                    "poison": 0xA33EA1,  # Purple
-                    "ground": 0xE2BF65,  # Tan
-                    "flying": 0xA98FF3,  # Light purple
-                    "psychic": 0xF95587,  # Pink
-                    "bug": 0xA6B91A,  # Light green
-                    "rock": 0xB6A136,  # Dark yellow
-                    "ghost": 0x735797,  # Dark purple
-                    "dragon": 0x6F35FC,  # Indigo
-                    "dark": 0x705746,  # Dark brown
-                    "steel": 0xB7B7CE,  # Gray
-                    "fairy": 0xD685AD,  # Light pink
-                }
-                return type_colors.get(primary_type, 0xFF5252)
-
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://pokeapi.co/api/v2/pokemon/{pokemon_name}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    primary_type = data["types"][0]["type"]["name"]
+                    type_colors = {
+                        "normal": 0xA8A77A, "fire": 0xEE8130, "water": 0x6390F0,
+                        "electric": 0xF7D02C, "grass": 0x7AC74C, "ice": 0x96D9D6,
+                        "fighting": 0xC22E28, "poison": 0xA33EA1, "ground": 0xE2BF65,
+                        "flying": 0xA98FF3, "psychic": 0xF95587, "bug": 0xA6B91A,
+                        "rock": 0xB6A136, "ghost": 0x735797, "dragon": 0x6F35FC,
+                        "dark": 0x705746, "steel": 0xB7B7CE, "fairy": 0xD685AD
+                    }
+                    return type_colors.get(primary_type, 0xFF5252)
         return 0xFF5252
     except Exception as err:
         logger.error(f"Error getting Pokémon color: {err}")
@@ -259,23 +319,29 @@ async def get_pokemon_color(pokemon_name):
 async def identify_pokemon(image_bytes):
     try:
         image_bytes.seek(0)
-
-        prompt = "What Pokémon is this? Give me just the name, no other text."
-
-        response = gemini_model.generate_content([
-            prompt,
-            {"mime_type": "image/jpeg", "data": image_bytes.read()}
-        ])
+        prompt = "What Pokémon is this? Reply ONLY with the lowercase English name, nothing else."
+        try:
+            response = await asyncio.wait_for(
+                gemini_model.generate_content_async([
+                    prompt,
+                    {"mime_type": "image/jpeg", "data": image_bytes.read()}
+                ]),
+                timeout=15
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Gemini API timeout")
+            return None
 
         image_bytes.seek(0)
+        name = response.text.strip().lower()
 
-        pokemon_name = response.text.strip().lower()
-        logger.info(f"Gemini identified Pokémon as: {pokemon_name}")
+        if len(name) < 3 or any(c.isdigit() for c in name):
+            logger.error(f"Invalid Pokémon name from API: {name}")
+            return None
 
-        return pokemon_name
-
+        return name
     except Exception as err:
-        logger.error(f"Error identifying Pokémon with Gemini: {err}")
+        logger.error(f"Error identifying Pokémon: {err}")
         return None
 
 
@@ -356,15 +422,11 @@ async def unsubscribe_all(interaction: discord.Interaction):
 
 
 if __name__ == "__main__":
-    if not DISCORD_TOKEN:
-        logger.error("DISCORD_TOKEN environment variable not set!")
-        exit(1)
-    if not GEMINI_API_KEY:
-        logger.error("GEMINI_API_KEY environment variable not set!")
+    if not DISCORD_TOKEN or not GEMINI_API_KEY:
+        logger.error("Missing required environment variables!")
         exit(1)
 
     last_save_time = asyncio.get_event_loop().time()
-
     try:
         bot.run(DISCORD_TOKEN)
     except Exception as e:
