@@ -341,59 +341,6 @@ async def subscription_status(interaction: discord.Interaction):
         await interaction.response.send_message("You are not subscribed to Pokémon notifications in any server.", ephemeral=True)
 
 
-@bot.tree.command(name="sub_all", description="Subscribe to servers the bot is in (limited to 10 servers)")
-@app_commands.describe(confirm="Type 'confirm' to acknowledge you may receive multiple notifications")
-async def subscribe_all(interaction: discord.Interaction, confirm: str = None):
-    user_id = interaction.user.id
-
-    if confirm != "confirm":
-        await interaction.response.send_message(
-            "⚠️ **Warning**: This will subscribe you to multiple servers at once.\n"
-            "You may receive many notifications if Pokémon spawn frequently.\n\n"
-            "To confirm, use: `/sub_all confirm:confirm`",
-            ephemeral=True
-        )
-        return
-
-    if user_id not in subscribed_users:
-        subscribed_users[user_id] = set()
-
-    available_guilds = [g for g in bot.guilds if g.id not in subscribed_users.get(user_id, set())]
-
-    MAX_SERVERS = 10
-    if len(available_guilds) > MAX_SERVERS:
-        available_guilds = available_guilds[:MAX_SERVERS]
-        await interaction.response.send_message(
-            f"⚠️ The bot is in too many servers. Subscribing you to {MAX_SERVERS} servers only.\n"
-            "For the remaining servers, please use `/sub` in each server individually.",
-            ephemeral=True
-        )
-        return
-
-    count = 0
-    guild_names = []
-
-    for guild in available_guilds:
-        if guild.id not in subscribed_users[user_id]:
-            subscribed_users[user_id].add(guild.id)
-            guild_names.append(f"• {guild.name}")
-            count += 1
-
-    if count > 0:
-        server_list = "\n".join(guild_names)
-        await interaction.response.send_message(
-            f"You've been subscribed to Pokémon notifications in {count} servers:\n\n{server_list}",
-            ephemeral=True
-        )
-
-        save_subscriptions()
-    else:
-        await interaction.response.send_message(
-            "You're already subscribed to all available servers!",
-            ephemeral=True
-        )
-
-
 @bot.tree.command(name="unsub_all", description="Unsubscribe from all servers")
 async def unsubscribe_all(interaction: discord.Interaction):
     user_id = interaction.user.id

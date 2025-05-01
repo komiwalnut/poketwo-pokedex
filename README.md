@@ -69,7 +69,6 @@ The bot will automatically create a `logs` directory with rotating log files.
 - `/sub` - Subscribe to receive Pokémon notifications in the current server
 - `/unsub` - Unsubscribe from Pokémon notifications in the current server
 - `/sub_status` - Check your subscription status across all servers
-- `/sub_all` - Subscribe to multiple servers at once (limited to 10 servers)
 - `/unsub_all` - Unsubscribe from all servers
 
 ## Getting a Discord Bot Token
