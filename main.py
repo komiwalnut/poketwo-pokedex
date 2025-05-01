@@ -392,7 +392,7 @@ async def subscription_status(interaction: discord.Interaction):
         await interaction.response.send_message("You are not subscribed to Pokémon notifications in any server.", ephemeral=True)
 
 
-@bot.tree.command(name="sub_all", description="Subscribe to servers the bot is in (limited to 25 servers)")
+@bot.tree.command(name="sub_all", description="Subscribe to servers the bot is in (limited to 10 servers)")
 @app_commands.describe(confirm="Type 'confirm' to acknowledge you may receive multiple notifications")
 async def subscribe_all(interaction: discord.Interaction, confirm: str = None):
     user_id = interaction.user.id
