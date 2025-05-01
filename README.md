@@ -1,4 +1,4 @@
-# Pokétwo Helper Discord Bot
+# Pokétwo Pokedex
 
 A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot and sends notifications to subscribed users.
 
@@ -22,8 +22,8 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 
 1. Clone this repository:
    ```
-   git clone https://github.com/komiwalnut/poketwo-helper.git
-   cd poketwo-helper
+   git clone https://github.com/komiwalnut/poketwo-pokedex.git
+   cd poketwo-pokedex
    ```
 
 2. Install Python 3 and venv (if not already installed):
