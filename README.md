@@ -1,8 +1,8 @@
 # Pokétwo Pokedex
 
-<img src="poketwo_image.svg" alt="Pokétwo Pokedex Bot" width="150"/>
+<img src="poketwo_image.svg" alt="Pokétwo Pokedex Bot" width="200"/>
 
-A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot and sends notifications to subscribed users.
+A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot and sends notifications to subscribed users. [Invite it to your server!](https://discord.com/oauth2/authorize?client_id=1367292911582056518)
 
 ## Features
 
@@ -53,7 +53,7 @@ A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot 
 ### Running the Bot
 
 ```
-python main.py
+nohup python3 -u main.py > bot_output.log 2>&1 &
 ```
 
 ## Commands
