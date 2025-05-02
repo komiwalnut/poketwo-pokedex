@@ -167,8 +167,11 @@ async def on_interaction(interaction: discord.Interaction):
                             new_embed.set_thumbnail(url=original_embed.thumbnail.url)
                             new_embed.set_footer(text=original_embed.footer.text)
 
-                            await interaction.message.edit(embed=new_embed)
-                            await interaction.followup.send("Updated with new identification!", ephemeral=True)
+                            if new_name != previous_name:
+                                await interaction.message.edit(embed=new_embed)
+                                await interaction.followup.send(f"Updated from **{previous_name.capitalize()}** to **{new_name.capitalize()}**!", ephemeral=True)
+                            else:
+                                await interaction.followup.send("AI still identified the same Pokémon. Try a new spawn instead.", ephemeral=True)
                         else:
                             await interaction.followup.send("Failed to re-identify Pokémon.", ephemeral=True)
 
