@@ -53,6 +53,7 @@ gemini_model = genai.GenerativeModel('gemini-2.5-flash-preview-04-17')
 
 subscribed_users = {}
 pending_corrections = {}
+POKEMON_COLOR_CACHE = {}
 last_save_time = 0
 
 
@@ -123,7 +124,7 @@ async def on_interaction(interaction: discord.Interaction):
                     await interaction.response.send_message("This request has expired.", ephemeral=True)
                     return
 
-                await interaction.response.defer(thinking=True)
+                await interaction.response.defer(ephemeral=True, thinking=True)
 
                 try:
                     async with aiohttp.ClientSession() as session:
@@ -138,7 +139,7 @@ async def on_interaction(interaction: discord.Interaction):
                         new_name = await identify_pokemon(image_bytes, previous_name)
 
                         if not new_name:
-                            await interaction.followup.send("Identification failed. Try again later.", ephemeral=True)
+                            await interaction.followup.send("Identification failed. Try again later.")
                             return
 
                         if new_name:
@@ -169,15 +170,15 @@ async def on_interaction(interaction: discord.Interaction):
 
                             if new_name != previous_name:
                                 await interaction.message.edit(embed=new_embed)
-                                await interaction.followup.send(f"Updated from **{previous_name.capitalize()}** to **{new_name.capitalize()}**!", ephemeral=True)
+                                await interaction.followup.send(f"Updated from **{previous_name.capitalize()}** to **{new_name.capitalize()}**!")
                             else:
-                                await interaction.followup.send("AI still identified the same Pokémon. Try a new spawn instead.", ephemeral=True)
+                                await interaction.followup.send("AI still identified the same Pokémon. Try a new spawn instead.")
                         else:
-                            await interaction.followup.send("Failed to re-identify Pokémon.", ephemeral=True)
+                            await interaction.followup.send("Failed to re-identify Pokémon.")
 
                 except Exception as err:
                     logger.error(f"Re-ID error: {err}")
-                    await interaction.followup.send("Error processing request. Please try a new spawn.", ephemeral=True)
+                    await interaction.followup.send("Error processing request. Please try a new spawn.")
 
     except Exception as err:
         logger.error(f"Interaction error: {err}")
@@ -303,6 +304,9 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
 
 
 async def get_pokemon_color(pokemon_name):
+    if pokemon_name in POKEMON_COLOR_CACHE:
+        return POKEMON_COLOR_CACHE[pokemon_name]
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://pokeapi.co/api/v2/pokemon/{pokemon_name}") as response:
@@ -317,7 +321,9 @@ async def get_pokemon_color(pokemon_name):
                         "rock": 0xB6A136, "ghost": 0x735797, "dragon": 0x6F35FC,
                         "dark": 0x705746, "steel": 0xB7B7CE, "fairy": 0xD685AD
                     }
-                    return type_colors.get(primary_type, 0xFF5252)
+                    color = type_colors.get(primary_type, 0xFF5252)
+                    POKEMON_COLOR_CACHE[pokemon_name] = color
+                    return color
         return 0xFF5252
     except Exception as err:
         logger.error(f"Error getting Pokémon color: {err}")
@@ -339,7 +345,7 @@ async def identify_pokemon(image_bytes, previous_name=None):
                     prompt,
                     {"mime_type": "image/jpeg", "data": image_bytes.read()}
                 ]),
-                timeout=15
+                timeout=10
             )
         except asyncio.TimeoutError:
             logger.warning("Gemini API timeout")
@@ -358,7 +364,7 @@ async def identify_pokemon(image_bytes, previous_name=None):
                         retry_prompt,
                         {"mime_type": "image/jpeg", "data": image_bytes.read()}
                     ]),
-                    timeout=15
+                    timeout=7
                 )
 
                 image_bytes.seek(0)
