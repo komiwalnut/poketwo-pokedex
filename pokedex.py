@@ -129,7 +129,13 @@ async def on_interaction(interaction: discord.Interaction):
                     async with aiohttp.ClientSession() as session:
                         image_data = await fetch_image(session, data["image_url"])
                         image_bytes = BytesIO(image_data)
-                        new_name = await identify_pokemon(image_bytes)
+
+                        original_embed = interaction.message.embeds[0]
+                        previous_name = None
+                        if original_embed.description and "I spotted a **" in original_embed.description:
+                            previous_name = original_embed.description.split("I spotted a **")[1].split("**")[0].lower()
+
+                        new_name = await identify_pokemon(image_bytes, previous_name)
 
                         if not new_name:
                             await interaction.followup.send("Identification failed. Try again later.", ephemeral=True)
@@ -137,7 +143,6 @@ async def on_interaction(interaction: discord.Interaction):
 
                         if new_name:
                             new_color = await get_pokemon_color(new_name)
-                            original_embed = interaction.message.embeds[0]
 
                             new_embed = discord.Embed(
                                 title=original_embed.title,
@@ -316,10 +321,15 @@ async def get_pokemon_color(pokemon_name):
         return 0xFF5252
 
 
-async def identify_pokemon(image_bytes):
+async def identify_pokemon(image_bytes, previous_name=None):
     try:
         image_bytes.seek(0)
-        prompt = "What Pokémon is this? Reply ONLY with the lowercase English name, nothing else."
+
+        if previous_name:
+            prompt = f"This Pokémon was previously identified as '{previous_name}', but that might be incorrect. Look carefully at the features, and colors. What Pokémon is this? Reply ONLY with the lowercase English name, nothing else."
+        else:
+            prompt = "What Pokémon is this? Reply ONLY with the lowercase English name, nothing else."
+
         try:
             response = await asyncio.wait_for(
                 gemini_model.generate_content_async([
@@ -334,6 +344,28 @@ async def identify_pokemon(image_bytes):
 
         image_bytes.seek(0)
         name = response.text.strip().lower()
+
+        if previous_name and name == previous_name:
+            image_bytes.seek(0)
+            retry_prompt = f"This is definitely NOT {previous_name}. Look more carefully at the distinctive features. What other Pokémon species could this be? Reply ONLY with the lowercase English name, nothing else."
+
+            try:
+                retry_response = await asyncio.wait_for(
+                    gemini_model.generate_content_async([
+                        retry_prompt,
+                        {"mime_type": "image/jpeg", "data": image_bytes.read()}
+                    ]),
+                    timeout=15
+                )
+
+                image_bytes.seek(0)
+                retry_name = retry_response.text.strip().lower()
+
+                if retry_name != previous_name and len(retry_name) >= 3 and not any(c.isdigit() for c in retry_name):
+                    return retry_name
+            except Exception as err:
+                logger.error(f"Error in retry identification: {err}")
+                pass
 
         if len(name) < 3 or any(c.isdigit() for c in name):
             logger.error(f"Invalid Pokémon name from API: {name}")
