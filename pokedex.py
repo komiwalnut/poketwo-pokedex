@@ -101,6 +101,30 @@ async def periodic_save():
         await asyncio.sleep(60)
 
 
+async def cleanup_corrections():
+    while True:
+        try:
+            current_time = time.time()
+            expired_ids = []
+
+            for correction_id, data in pending_corrections.items():
+                if "timestamp" not in data:
+                    data["timestamp"] = current_time
+                elif current_time - data["timestamp"] > 1800:
+                    expired_ids.append(correction_id)
+
+            for correction_id in expired_ids:
+                del pending_corrections[correction_id]
+
+            if expired_ids:
+                logger.info(f"Cleaned up {len(expired_ids)} expired correction entries")
+
+            await asyncio.sleep(300)
+        except Exception as err:
+            logger.error(f"Error in cleanup task: {err}")
+            await asyncio.sleep(300)
+
+
 async def rotating_status():
     while True:
         try:
@@ -240,16 +264,35 @@ async def on_interaction(interaction: discord.Interaction):
                 try:
                     async with aiohttp.ClientSession() as session:
                         image_data = await fetch_image(session, data["image_url"])
+                        if not image_data:
+                            await interaction.followup.send("Failed to fetch the image. Please try again.")
+                            return
+
                         image_bytes = BytesIO(image_data)
 
-                        processed_image = await remove_background(image_bytes)
+                        try:
+                            processed_image = await asyncio.wait_for(
+                                remove_background(image_bytes),
+                                timeout=15
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning("Background removal timed out during correction")
+                            image_bytes.seek(0)
+                            processed_image = image_bytes
 
                         original_embed = interaction.message.embeds[0]
                         previous_name = None
                         if original_embed.description and "I spotted a **" in original_embed.description:
                             previous_name = original_embed.description.split("I spotted a **")[1].split("**")[0].lower()
 
-                        new_name = await identify_pokemon(processed_image, previous_name)
+                        try:
+                            new_name = await asyncio.wait_for(
+                                identify_pokemon(processed_image, previous_name),
+                                timeout=15
+                            )
+                        except asyncio.TimeoutError:
+                            await interaction.followup.send("Identification timed out. Please try again later.")
+                            return
 
                         if not new_name:
                             await interaction.followup.send("Identification failed. Try again later.")
@@ -366,25 +409,54 @@ async def on_message(message):
 async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
     try:
         async with aiohttp.ClientSession() as session:
-            image_data = await fetch_image(session, image_url)
-            image_bytes = BytesIO(image_data)
+            try:
+                image_data = await fetch_image(session, image_url)
+                if not image_data:
+                    logger.error("Failed to fetch image data")
+                    return
 
-            processed_image = await remove_background(image_bytes)
-            pokemon_name = await identify_pokemon(processed_image)
+                image_bytes = BytesIO(image_data)
 
-            if pokemon_name:
+                try:
+                    processed_image = await asyncio.wait_for(
+                        remove_background(image_bytes),
+                        timeout=15
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Background removal timed out, using original image")
+                    image_bytes.seek(0)
+                    processed_image = image_bytes
+
+                try:
+                    pokemon_name = await asyncio.wait_for(
+                        identify_pokemon(processed_image),
+                        timeout=15
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Pokemon identification timed out")
+                    return
+
+                if not pokemon_name:
+                    logger.warning("Failed to identify pokemon")
+                    return
+
                 pokemon_color = await get_pokemon_color(pokemon_name)
                 correction_id = str(uuid.uuid4())
+
                 pending_corrections[correction_id] = {
                     "image_url": image_url,
                     "guild_name": guild_name,
                     "message_link": message_link,
-                    "image_bytes": image_bytes.getvalue()
+                    "timestamp": time.time()
                 }
 
+                user_count = 0
                 for user_id, guilds in subscribed_users.items():
                     if guild_id in guilds:
                         try:
+                            if user_count > 0 and user_count % 5 == 0:
+                                await asyncio.sleep(1)
+
                             user = await bot.fetch_user(user_id)
                             embed = discord.Embed(
                                 title="Wild Pokémon Appeared! ✨",
@@ -412,10 +484,22 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
                             ))
 
                             await user.send(content=f"<@716390085896962058> catch {pokemon_name}", embed=embed, view=view)
+                            user_count += 1
+                        except discord.errors.HTTPException as http_err:
+                            if http_err.status == 429:
+                                logger.warning(f"Rate limited when DMing users. Sleeping for 5 seconds.")
+                                await asyncio.sleep(5)
+                            else:
+                                logger.error(f"HTTP error when DMing user {user_id}: {http_err}")
                         except Exception as err:
                             logger.error(f"Failed to DM user {user_id}: {err}")
+
+            except aiohttp.ClientError as ce:
+                logger.error(f"Connection error: {ce}")
+            except Exception as err:
+                logger.error(f"Error processing image: {err}")
     except Exception as err:
-        logger.error(f"Error processing Pokémon image: {err}")
+        logger.error(f"Fatal error processing Pokémon image: {err}")
 
 
 async def get_pokemon_color(pokemon_name):
