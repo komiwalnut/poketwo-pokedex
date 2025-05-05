@@ -12,6 +12,12 @@ from dotenv import load_dotenv
 import json
 import asyncio
 import uuid
+import time
+from rembg import remove
+from PIL import Image
+import cv2
+import numpy as np
+import random
 
 load_dotenv()
 
@@ -97,18 +103,127 @@ async def periodic_save():
 
 async def rotating_status():
     while True:
-        statuses = [
-            {"type": discord.ActivityType.watching, "name": "for shinies!"},
-            {"type": discord.ActivityType.playing, "name": f"with {len(bot.guilds)} servers"},
-        ]
-        for status in statuses:
+        try:
+            guild_count = len(bot.guilds)
+            user_count = len(subscribed_users)
+            total_subscriptions = sum(len(guild_ids) for guild_ids in subscribed_users.values())
+
+            statuses = [
+                {"type": discord.ActivityType.watching, "name": "for wild Pokémon!"},
+                {"type": discord.ActivityType.playing, "name": f"in {guild_count} servers"},
+                {"type": discord.ActivityType.listening, "name": f"to {user_count} trainers"},
+                {"type": discord.ActivityType.watching, "name": "@Pokétwo spawns"},
+                {"type": discord.ActivityType.watching, "name": "/sub to get alerts!"},
+                {"type": discord.ActivityType.playing, "name": "/stats for bot info"},
+                {"type": discord.ActivityType.listening, "name": "/unsub to stop alerts"},
+                {"type": discord.ActivityType.watching, "name": "/sub_status for subscriptions"},
+                {"type": discord.ActivityType.playing, "name": "/unsub_all to clear all"},
+                {"type": discord.ActivityType.watching, "name": f"{total_subscriptions} active alerts"},
+            ]
+
+            status = random.choice(statuses)
             await bot.change_presence(activity=discord.Activity(**status))
-            await asyncio.sleep(300)
+
+            await asyncio.sleep(random.randint(120, 240))
+
+        except Exception as err:
+            logger.error(f"Status rotation error: {err}")
+            await asyncio.sleep(60)
 
 
 async def fetch_image(session, url):
     async with session.get(url) as response:
         return await response.read()
+
+
+async def remove_background(image_bytes):
+    try:
+        image_bytes.seek(0)
+        image = Image.open(image_bytes)
+
+        try:
+            output = remove(image)
+
+            output_np = np.array(output)
+            if len(output_np.shape) > 2 and output_np.shape[2] == 4:
+                transparent_pixels = np.sum(output_np[:, :, 3] == 0)
+                if transparent_pixels > 100:
+                    output_buffer = BytesIO()
+                    output.save(output_buffer, format="PNG")
+                    output_buffer.seek(0)
+                    return output_buffer
+        except Exception as err:
+            logger.error(f"Rembg error, falling back to custom method: {err}")
+
+        img_np = np.array(image)
+
+        if len(img_np.shape) > 2 and img_np.shape[2] == 4:
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
+
+        hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+
+        masks = []
+
+        background_definitions = [
+            {'lower': np.array([0, 0, 180]), 'upper': np.array([180, 70, 255])},
+            {'lower': np.array([90, 40, 150]), 'upper': np.array([140, 255, 255])},
+            {'lower': np.array([0, 0, 100]), 'upper': np.array([180, 30, 220])},
+            {'lower': np.array([35, 40, 150]), 'upper': np.array([85, 255, 255])}
+        ]
+
+        for bg in background_definitions:
+            mask = cv2.inRange(hsv, bg['lower'], bg['upper'])
+            masks.append(mask)
+
+        combined_mask = masks[0]
+        for mask in masks[1:]:
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+
+        kernel = np.ones((3, 3), np.uint8)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+
+        pokemon_mask = cv2.bitwise_not(combined_mask)
+
+        contours, _ = cv2.findContours(pokemon_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours and len(contours) > 0:
+            largest_contour = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(largest_contour)
+
+            if area > 500:
+                clean_mask = np.zeros_like(pokemon_mask)
+                cv2.drawContours(clean_mask, [largest_contour], 0, 255, -1)
+
+                kernel = np.ones((5, 5), np.uint8)
+                clean_mask = cv2.dilate(clean_mask, kernel, iterations=1)
+
+                rgba = cv2.cvtColor(img_np, cv2.COLOR_RGB2RGBA)
+                rgba[:, :, 3] = clean_mask
+
+                output = Image.fromarray(rgba)
+
+                output_buffer = BytesIO()
+                output.save(output_buffer, format="PNG")
+                output_buffer.seek(0)
+                return output_buffer
+
+        image_bytes.seek(0)
+        try:
+            output = remove(image)
+            output_buffer = BytesIO()
+            output.save(output_buffer, format="PNG")
+            output_buffer.seek(0)
+            return output_buffer
+        except Exception as err:
+            logger.error(f"Failed to process output image error: {err}")
+            image_bytes.seek(0)
+            return image_bytes
+
+    except Exception as err:
+        logger.error(f"Background removal error: {err}")
+        image_bytes.seek(0)
+        return image_bytes
 
 
 @bot.listen()
@@ -131,12 +246,14 @@ async def on_interaction(interaction: discord.Interaction):
                         image_data = await fetch_image(session, data["image_url"])
                         image_bytes = BytesIO(image_data)
 
+                        processed_image = await remove_background(image_bytes)
+
                         original_embed = interaction.message.embeds[0]
                         previous_name = None
                         if original_embed.description and "I spotted a **" in original_embed.description:
                             previous_name = original_embed.description.split("I spotted a **")[1].split("**")[0].lower()
 
-                        new_name = await identify_pokemon(image_bytes, previous_name)
+                        new_name = await identify_pokemon(processed_image, previous_name)
 
                         if not new_name:
                             await interaction.followup.send("Identification failed. Try again later.")
@@ -255,7 +372,9 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
         async with aiohttp.ClientSession() as session:
             image_data = await fetch_image(session, image_url)
             image_bytes = BytesIO(image_data)
-            pokemon_name = await identify_pokemon(image_bytes)
+
+            processed_image = await remove_background(image_bytes)
+            pokemon_name = await identify_pokemon(processed_image)
 
             if pokemon_name:
                 pokemon_color = await get_pokemon_color(pokemon_name)
@@ -343,7 +462,7 @@ async def identify_pokemon(image_bytes, previous_name=None):
             response = await asyncio.wait_for(
                 gemini_model.generate_content_async([
                     prompt,
-                    {"mime_type": "image/jpeg", "data": image_bytes.read()}
+                    {"mime_type": "image/png", "data": image_bytes.read()}
                 ]),
                 timeout=10
             )
@@ -362,7 +481,7 @@ async def identify_pokemon(image_bytes, previous_name=None):
                 retry_response = await asyncio.wait_for(
                     gemini_model.generate_content_async([
                         retry_prompt,
-                        {"mime_type": "image/jpeg", "data": image_bytes.read()}
+                        {"mime_type": "image/png", "data": image_bytes.read()}
                     ]),
                     timeout=7
                 )
@@ -460,6 +579,27 @@ async def unsubscribe_all(interaction: discord.Interaction):
         save_subscriptions()
     else:
         await interaction.response.send_message("You weren't subscribed to any Pokémon notifications.", ephemeral=True)
+
+
+@bot.tree.command(name="stats", description="Show bot statistics")
+@app_commands.checks.cooldown(1, 60, key=lambda i: i.user.id)
+async def stats(interaction: discord.Interaction):
+    server_count = len(bot.guilds)
+    user_count = len(subscribed_users)
+
+    total_subscriptions = sum(len(guild_ids) for guild_ids in subscribed_users.values())
+
+    embed = discord.Embed(
+        title="📊 Pokétwo Pokédex Stats",
+        description="Current bot statistics and usage information",
+        color=0x4285F4
+    )
+
+    embed.add_field(name="Servers", value=f"`{server_count}` servers", inline=True)
+    embed.add_field(name="Subscribed Users", value=f"`{user_count}` users", inline=True)
+    embed.add_field(name="Total Subscriptions", value=f"`{total_subscriptions}` subscriptions", inline=True)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 if __name__ == "__main__":
