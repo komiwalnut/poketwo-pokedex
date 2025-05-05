@@ -105,19 +105,15 @@ async def rotating_status():
     while True:
         try:
             guild_count = len(bot.guilds)
-            user_count = len(subscribed_users)
             total_subscriptions = sum(len(guild_ids) for guild_ids in subscribed_users.values())
 
             statuses = [
                 {"type": discord.ActivityType.watching, "name": "for wild Pokémon!"},
                 {"type": discord.ActivityType.playing, "name": f"in {guild_count} servers"},
-                {"type": discord.ActivityType.listening, "name": f"to {user_count} trainers"},
                 {"type": discord.ActivityType.watching, "name": "@Pokétwo spawns"},
                 {"type": discord.ActivityType.watching, "name": "/sub to get alerts!"},
                 {"type": discord.ActivityType.playing, "name": "/stats for bot info"},
                 {"type": discord.ActivityType.listening, "name": "/unsub to stop alerts"},
-                {"type": discord.ActivityType.watching, "name": "/sub_status for subscriptions"},
-                {"type": discord.ActivityType.playing, "name": "/unsub_all to clear all"},
                 {"type": discord.ActivityType.watching, "name": f"{total_subscriptions} active alerts"},
             ]
 
