@@ -169,7 +169,7 @@ async def on_interaction(interaction: discord.Interaction):
                             new_embed.set_footer(text=original_embed.footer.text)
 
                             if new_name != previous_name:
-                                await interaction.message.edit(embed=new_embed)
+                                await interaction.message.edit(content=f"<@716390085896962058> catch {new_name}", embed=new_embed)
                                 await interaction.followup.send(f"Updated from **{previous_name.capitalize()}** to **{new_name.capitalize()}**!")
                             else:
                                 await interaction.followup.send("AI still identified the same Pokémon. Try a new spawn instead.")
@@ -296,7 +296,7 @@ async def process_pokemon_image(image_url, guild_id, guild_name, message_link):
                                 custom_id=f"wrong_pokemon:{correction_id}"
                             ))
 
-                            await user.send(embed=embed, view=view)
+                            await user.send(content=f"<@716390085896962058> catch {pokemon_name}", embed=embed, view=view)
                         except Exception as err:
                             logger.error(f"Failed to DM user {user_id}: {err}")
     except Exception as err:
