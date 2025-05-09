@@ -3,7 +3,7 @@
 <img src="poketwo_image.svg" alt="Pokétwo Pokedex Bot" width="200"/>
 <img src="sample.png" alt="Sample Image"/> 
 
-A Discord bot that automatically identifies wild Pokémon from the Pokétwo bot and sends notifications to subscribed users. [Invite it to your server!](https://discord.com/oauth2/authorize?client_id=1367292911582056518)
+A Discord bot that automatically identifies wild Pokémons from the [Pokétwo](https://poketwo.net/) Discord bot and sends notifications to subscribed users. [Invite it to your server!](https://discord.com/oauth2/authorize?client_id=1367292911582056518)
 
 > **Note:**
 > This bot uses the [Google Gemini AI model](https://ai.google.dev/gemini-api/docs/models) `gemini-2.5-flash-preview-04-17` to identify Pokémon. As with any AI-based system, the results (Pokémon names) may not always be accurate.
